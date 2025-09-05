@@ -175,8 +175,9 @@ namespace Prowl.Quill
         }
 
         public IReadOnlyList<DrawCall> DrawCalls => _drawCalls.Where(d => d.ElementCount != 0).ToList();
-        public IReadOnlyList<uint> Indices => _indices.AsReadOnly();
-        public IReadOnlyList<Vertex> Vertices => _vertices.AsReadOnly();
+        public uint[] Indices => _indices;
+        public Vertex[] Vertices => _vertices;
+        // public IReadOnlyList<Vertex> Vertices => _vertices.AsReadOnly();
         public Vector2 CurrentPoint => _currentSubPath != null && _currentSubPath.Points.Count > 0 ? CurrentPointInternal : Vector2.zero;
 
         internal Vector2 CurrentPointInternal => _currentSubPath.Points[_currentSubPath.Points.Count - 1];
@@ -185,8 +186,13 @@ namespace Prowl.Quill
         internal List<DrawCall> _drawCalls = new List<DrawCall>();
         internal Stack<object> _textureStack = new Stack<object>();
 
-        internal List<uint> _indices = new List<uint>();
-        internal List<Vertex> _vertices = new List<Vertex>();
+        internal uint[] _indices = new uint[4096];
+        internal int _currentIndicesIndex;
+        public int VertexIndexCount => _currentIndicesIndex;
+        
+        internal Vertex[] _vertices = new Vertex[4096];
+        internal int _vertexCount = 0;
+        public int VertextCount => _vertexCount;
 
         private readonly List<SubPath> _subPaths = new List<SubPath>();
         private SubPath? _currentSubPath = null;
@@ -235,8 +241,10 @@ namespace Prowl.Quill
             _textureStack.Clear();
             AddDrawCmd();
 
-            _indices.Clear();
-            _vertices.Clear();
+            // _indices.Clear();
+            _currentIndicesIndex = 0;
+            _vertexCount = 0;
+            // _vertices.Clear();
 
             _savedStates.Clear();
             _state = new ProwlCanvasState();
@@ -479,11 +487,20 @@ namespace Prowl.Quill
             }
 
 
-            // Add the vertex to the list
-            _vertices.Add(vertex);
+            if (_vertexCount >= _vertices.Length)
+            {
+                var newIndexArray = new Vertex[_vertices.Length * 2];
+                Array.Copy(_vertices, newIndexArray, _vertexCount);
+                _vertices = newIndexArray;
+            }
+            
+            _vertices[_vertexCount] = vertex;
+            _vertexCount++;
+            // // Add the vertex to the list
+            // _vertices.Add(vertex);
         }
 
-        public void AddTriangle() => AddTriangle(_vertices.Count - 3, _vertices.Count - 2, _vertices.Count - 1);
+        public void AddTriangle() => AddTriangle(_vertexCount - 3, _vertexCount - 2, _vertexCount - 1);
         public void AddTriangle(int v1, int v2, int v3) => AddTriangle((uint)v1, (uint)v2, (uint)v3);
         public void AddTriangle(uint v1, uint v2, uint v3)
         {
@@ -491,13 +508,29 @@ namespace Prowl.Quill
                 return;
 
             // Add the triangle indices to the list
-            _indices.Add(v1);
-            _indices.Add(v2);
-            _indices.Add(v3);
+            AddIndex(v1);
+            AddIndex(v2);
+            AddIndex(v3);
+            // _indices.Add(v1);
+            // _indices.Add(v2);
+            // _indices.Add(v3);
 
             AddTriangleCount(1);
         }
 
+        private void AddIndex(uint idx)
+        {
+            if (_currentIndicesIndex >= _indices.Length)
+            {
+                var newIndexArray = new uint[_indices.Length * 2];
+                Array.Copy(_indices, newIndexArray, _currentIndicesIndex);
+                _indices = newIndexArray;
+            }
+
+            _indices[_currentIndicesIndex] = idx;
+            _currentIndicesIndex++;
+        }
+        
         private void AddTriangleCount(int count)
         {
             if (_drawCalls.Count == 0)
@@ -1026,7 +1059,7 @@ namespace Prowl.Quill
             var vertices = tess.Vertices;
 
             // Create vertices and triangles
-            uint startVertexIndex = (uint)_vertices.Count;
+            uint startVertexIndex = (uint)_vertexCount;
             for (int i = 0; i < vertices.Length; i++)
             {
                 var vertex = vertices[i];
@@ -1062,7 +1095,7 @@ namespace Prowl.Quill
             center /= copy.Length;
 
             // Store the starting index to reference _vertices
-            uint startVertexIndex = (uint)_vertices.Count;
+            uint startVertexIndex = (uint)_vertexCount;
 
             // Add center vertex with UV at 0.5,0.5 (no AA, Since 0 or 1 in shader is considered edge of shape and get anti aliased)
             AddVertex(new Vertex(center, new Vector2(0.5f, 0.5f), _state.fillColor));
@@ -1098,15 +1131,21 @@ namespace Prowl.Quill
 
                 if (clockwise)
                 {
-                    _indices.Add(centerIdx);
-                    _indices.Add(current);
-                    _indices.Add(next);
+                    AddIndex(centerIdx);
+                    AddIndex(current);
+                    AddIndex(next);
+                    // _indices.Add(centerIdx);
+                    // _indices.Add(current);
+                    // _indices.Add(next);
                 }
                 else
                 {
-                    _indices.Add(centerIdx);
-                    _indices.Add(next);
-                    _indices.Add(current);
+                    AddIndex(centerIdx);
+                    AddIndex(next);
+                    AddIndex(current);
+                    // _indices.Add(centerIdx);
+                    // _indices.Add(next);
+                    // _indices.Add(current);
                 }
 
                 //AddTriangleCount(1);
@@ -1151,7 +1190,7 @@ namespace Prowl.Quill
 
 
             // Store the starting index to reference _vertices
-            uint startVertexIndex = (uint)_vertices.Count;
+            uint startVertexIndex = (uint)_vertexCount;
             foreach (var triangle in triangles)
             {
                 var color = triangle.Color;
@@ -1163,9 +1202,9 @@ namespace Prowl.Quill
             // Add triangle _indices
             for (uint i = 0; i < triangles.Count; i++)
             {
-                _indices.Add(startVertexIndex + (i * 3));
-                _indices.Add(startVertexIndex + (i * 3) + 1);
-                _indices.Add(startVertexIndex + (i * 3) + 2);
+                AddIndex(startVertexIndex + (i * 3));
+                AddIndex(startVertexIndex + (i * 3) + 1);
+                AddIndex(startVertexIndex + (i * 3) + 2);
                 //AddTriangleCount(1);
             }
 
@@ -1404,7 +1443,7 @@ namespace Prowl.Quill
             Vector2 bottomLeft = TransformPoint(new Vector2(x + width, y));
 
             // Store the starting index to reference _vertices
-            uint startVertexIndex = (uint)_vertices.Count;
+            uint startVertexIndex = (uint)_vertexCount;
 
             // Add all vertices with the transformed coordinates
             AddVertex(new Vertex(topLeft, new Vector2(0, 0), color));
@@ -1413,13 +1452,13 @@ namespace Prowl.Quill
             AddVertex(new Vertex(bottomLeft, new Vector2(1, 0), color));
 
             // Add indexes for fill
-            _indices.Add(startVertexIndex);
-            _indices.Add(startVertexIndex + 1);
-            _indices.Add(startVertexIndex + 2);
+            AddIndex(startVertexIndex);
+            AddIndex(startVertexIndex + 1);
+            AddIndex(startVertexIndex + 2);
 
-            _indices.Add(startVertexIndex);
-            _indices.Add(startVertexIndex + 2);
-            _indices.Add(startVertexIndex + 3);
+            AddIndex(startVertexIndex);
+            AddIndex(startVertexIndex + 2);
+            AddIndex(startVertexIndex + 3);
 
             AddTriangleCount(2);
         }
@@ -1451,6 +1490,8 @@ namespace Prowl.Quill
             RoundedRectFilled(x, y, width, height, radius, radius, radius, radius, color);
         }
 
+        internal Vector2[] _interalVertexPositionArray = new Vector2[128];
+        
         /// <summary>
         /// Paints a Hardware-accelerated rounded rectangle on the canvas.
         /// This does not modify or use the current path.
@@ -1492,7 +1533,7 @@ namespace Prowl.Quill
             int blSegments = Math.Max(1, (int)Math.Ceiling(Math.PI * blRadii / 2 / _state.roundingMinDistance));
 
             // Store the starting index to reference _vertices
-            uint startVertexIndex = (uint)_vertices.Count;
+            uint startVertexIndex = (uint)_vertexCount;
 
             // Calculate the center point of the rectangle
             Vector2 center = TransformPoint(new Vector2(x + width / 2, y + height / 2));
@@ -1500,7 +1541,9 @@ namespace Prowl.Quill
             // Add center vertex with UV at 0.5,0.5 (no AA)
             AddVertex(new Vertex(center, new Vector2(0.5f, 0.5f), color));
 
-            List<Vector2> points = new List<Vector2>();
+            // List<Vector2> points = new List<Vector2>();
+            int pointsCount = tlRadii > 0? tlSegments : 1 + trRadii > 0? trSegments : 1 + brRadii > 0? brSegments : 1  + blRadii > 0? blSegments : 1 ;
+            int idx = 0;
 
             // Top-left corner
             if (tlRadii > 0)
@@ -1511,12 +1554,15 @@ namespace Prowl.Quill
                     double angle = Math.PI + (Math.PI / 2) * i / tlSegments;
                     double vx = tlCenter.x + tlRadii * Math.Cos(angle);
                     double vy = tlCenter.y + tlRadii * Math.Sin(angle);
-                    points.Add(new Vector2(vx, vy));
+                    _interalVertexPositionArray[idx] = new Vector2(vx, vy);
+                    idx++;
+                    // points.Add(new Vector2(vx, vy));
                 }
             }
             else
             {
-                points.Add(new Vector2(x, y));
+                _interalVertexPositionArray[idx] = new Vector2(x, y);
+                idx++;
             }
 
             // Top-right corner
@@ -1528,12 +1574,15 @@ namespace Prowl.Quill
                     double angle = Math.PI * 3 / 2 + (Math.PI / 2) * i / trSegments;
                     double vx = trCenter.x + trRadii * Math.Cos(angle);
                     double vy = trCenter.y + trRadii * Math.Sin(angle);
-                    points.Add(new Vector2(vx, vy));
+                    _interalVertexPositionArray[idx] = new Vector2(vx, vy);
+                    idx++;
                 }
             }
             else
             {
-                points.Add(new Vector2(x + width, y));
+                // points.Add(new Vector2(x + width, y));
+                _interalVertexPositionArray[idx] = new Vector2(x + width, y);
+                idx++;
             }
 
             // Bottom-right corner
@@ -1545,12 +1594,15 @@ namespace Prowl.Quill
                     double angle = 0 + (Math.PI / 2) * i / brSegments;
                     double vx = brCenter.x + brRadii * Math.Cos(angle);
                     double vy = brCenter.y + brRadii * Math.Sin(angle);
-                    points.Add(new Vector2(vx, vy));
+                    _interalVertexPositionArray[idx] = new Vector2(vx, vy);
+                    idx++;
                 }
             }
             else
             {
-                points.Add(new Vector2(x + width, y + height));
+                // points.Add(new Vector2(x + width, y + height));
+                _interalVertexPositionArray[idx] = new Vector2(x + width, y + height);
+                idx++;
             }
 
             // Bottom-left corner
@@ -1562,34 +1614,37 @@ namespace Prowl.Quill
                     double angle = Math.PI / 2 + (Math.PI / 2) * i / blSegments;
                     double vx = blCenter.x + blRadii * Math.Cos(angle);
                     double vy = blCenter.y + blRadii * Math.Sin(angle);
-                    points.Add(new Vector2(vx, vy));
+                    _interalVertexPositionArray[idx] = new Vector2(vx, vy);
+                    idx++;
                 }
             }
             else
             {
-                points.Add(new Vector2(x, y + height));
+                // points.Add(new Vector2(x, y + height));
+                _interalVertexPositionArray[idx] = new Vector2(x + width, y);
+                idx++;
             }
 
             // Add all edge vertices
-            for (int i = 0; i < points.Count; i++)
+            for (int i = 0; i < pointsCount; i++)
             {
-                Vector2 transformedPoint = TransformPoint(points[i]);
+                Vector2 transformedPoint = TransformPoint(_interalVertexPositionArray[i]);
                 AddVertex(new Vertex(transformedPoint, new Vector2(0, 0), color));
             }
 
             // Create triangles (fan from center to edges)
-            for (int i = 0; i < points.Count; i++)
+            for (int i = 0; i < pointsCount; i++)
             {
                 uint current = (uint)(startVertexIndex + 1 + i);
-                uint next = (uint)(startVertexIndex + 1 + ((i + 1) % points.Count));
+                uint next = (uint)(startVertexIndex + 1 + ((i + 1) % pointsCount));
 
-                _indices.Add((uint)startVertexIndex);  // Center
-                _indices.Add(next);                    // Next edge vertex
-                _indices.Add(current);                 // Current edge vertex
+                AddIndex(startVertexIndex);  // Center
+                AddIndex(next);                    // Next edge vertex
+                AddIndex(current);                 // Current edge vertex
 
                 //AddTriangleCount(1);
             }
-            AddTriangleCount(points.Count);
+            AddTriangleCount(pointsCount);
         }
 
         /// <summary>
@@ -1618,7 +1673,7 @@ namespace Prowl.Quill
             radius += _pixelHalf;
 
             // Store the starting index to reference _vertices
-            uint startVertexIndex = (uint)_vertices.Count;
+            uint startVertexIndex = (uint)_vertexCount;
 
             Vector2 transformedCenter = TransformPoint(new Vector2(x, y));
 
@@ -1645,9 +1700,9 @@ namespace Prowl.Quill
             // Create triangles (fan from center to edges)
             for (int i = 0; i < segments; i++)
             {
-                _indices.Add((uint)startVertexIndex);                  // Center
-                _indices.Add((uint)(startVertexIndex + 1 + ((i + 1) % segments))); // Next edge vertex
-                _indices.Add((uint)(startVertexIndex + 1 + i));          // Current edge vertex
+                AddIndex((uint)startVertexIndex);                  // Center
+                AddIndex((uint)(startVertexIndex + 1 + ((i + 1) % segments))); // Next edge vertex
+                AddIndex((uint)(startVertexIndex + 1 + i));          // Current edge vertex
 
                 //AddTriangleCount(1);
             }
@@ -1696,7 +1751,7 @@ namespace Prowl.Quill
             double centroidY = y + centroidDistance * Math.Sin(midAngle);
 
             // Store the starting index to reference _vertices
-            uint startVertexIndex = (uint)_vertices.Count;
+            uint startVertexIndex = (uint)_vertexCount;
 
             Vector2 transformedCenter = TransformPoint(new Vector2(x, y));
             Vector2 transformedCentroid = TransformPoint(new Vector2(centroidX, centroidY));
@@ -1730,9 +1785,9 @@ namespace Prowl.Quill
             // Create triangles (fan from centroid to each pair of edge points)
             for (int i = 0; i < segments + 2; i++)
             {
-                _indices.Add(startVertexIndex);                  // Centroid
-                _indices.Add((uint)(startVertexIndex + 1 + i + 1));      // Next edge vertex
-                _indices.Add((uint)(startVertexIndex + 1 + i));          // Current edge vertex
+                AddIndex(startVertexIndex);                  // Centroid
+                AddIndex((uint)(startVertexIndex + 1 + i + 1));      // Next edge vertex
+                AddIndex((uint)(startVertexIndex + 1 + i));          // Current edge vertex
 
                 //AddTriangleCount(1);
             }

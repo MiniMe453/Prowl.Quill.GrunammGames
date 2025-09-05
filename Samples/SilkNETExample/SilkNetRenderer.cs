@@ -317,7 +317,7 @@ void main()
 
         public unsafe void RenderCalls(Canvas canvas, IReadOnlyList<DrawCall> drawCalls)
         {
-            if (drawCalls.Count == 0 || canvas.Vertices.Count == 0 || canvas.Indices.Count == 0)
+            if (drawCalls.Count == 0 || canvas.Vertices.Count == 0 || canvas.VertexIndexCount == 0)
                 return;
 
             // Set up rendering state
@@ -366,11 +366,11 @@ void main()
     
             // Upload indices
             _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _ebo);
-            fixed (uint* indexPtr = canvas.Indices.ToArray())
+            fixed (uint* indexPtr = canvas.Indices)
             {
                 _gl.BufferData(
                     BufferTargetARB.ElementArrayBuffer,
-                    (nuint)(canvas.Indices.Count * sizeof(uint)),
+                    (nuint)(canvas.VertexIndexCount * sizeof(uint)),
                     indexPtr,
                     BufferUsageARB.StreamDraw
                 );
