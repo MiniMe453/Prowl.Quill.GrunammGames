@@ -48,11 +48,11 @@ namespace Prowl.Quill
         /// <param name="miterLimit">The miter limit (used when jointStyle is Miter)</param>
         /// <param name="allowOverlap">Whether to allow overlapping vertices for better results with close points</param>
         /// <returns>A list of triangles describing the path</returns>
-        public static IReadOnlyList<Triangle> Create(List<Vector2> points, double thickness, double pixelWidth, System.Drawing.Color color, JointStyle jointStyle = JointStyle.Miter, double miterLimit = 4.0, bool allowOverlap = false, EndCapStyle startCap = EndCapStyle.Butt, EndCapStyle endCap = EndCapStyle.Butt, List<double> dashPattern = null, double dashOffset = 0.0)
+        public static IReadOnlyList<Triangle> Create(Vector2[] points, int pointCount, double thickness, double pixelWidth, System.Drawing.Color color, JointStyle jointStyle = JointStyle.Miter, double miterLimit = 4.0, bool allowOverlap = false, EndCapStyle startCap = EndCapStyle.Butt, EndCapStyle endCap = EndCapStyle.Butt, List<double> dashPattern = null, double dashOffset = 0.0)
         {
             TriangleCache.Clear();
 
-            if (points.Count < 2 || thickness <= 0 || color.A == 0)
+            if (pointCount < 2 || thickness <= 0 || color.A == 0)
                 return TriangleCache;
 
             // Handle thin lines with alpha adjustment instead of thickness reduction
@@ -65,7 +65,7 @@ namespace Prowl.Quill
             thickness += pixelWidth;
             double halfThickness = thickness / 2;
 
-            var dashSegments = GenerateDashSegments(points, dashPattern, dashOffset, HalfPixel);
+            var dashSegments = GenerateDashSegments(points, pointCount, dashPattern, dashOffset, HalfPixel);
             if (dashSegments.Count == 0)
                 return TriangleCache;
 
@@ -218,13 +218,13 @@ namespace Prowl.Quill
         }
 
 
-        private static List<List<Vector2>> GenerateDashSegments(List<Vector2> points, List<double> dashPattern, double dashOffset, Vector2 halfPixelOffset)
+        private static List<List<Vector2>> GenerateDashSegments(Vector2[] points, int pointsCount, List<double> dashPattern, double dashOffset, Vector2 halfPixelOffset)
         {
             var allDashSegments = new List<List<Vector2>>();
 
-            if (points.Count < 2 || dashPattern == null || dashPattern.Count == 0 || dashPattern.Sum() <= Epsilon)
+            if (pointsCount < 2 || dashPattern == null || dashPattern.Count == 0 || dashPattern.Sum() <= Epsilon)
             {
-                if (points.Count >= 2)
+                if (pointsCount >= 2)
                 {
                     var singleSegment = points.Select(p => p + halfPixelOffset).ToList();
                     allDashSegments.Add(singleSegment);
@@ -235,7 +235,7 @@ namespace Prowl.Quill
             var dashState = InitializeDashState(dashPattern, dashOffset);
             var currentDashPoints = new List<Vector2>();
 
-            ProcessLineSegments(points, halfPixelOffset, dashPattern, dashState, currentDashPoints, allDashSegments);
+            ProcessLineSegments(points, pointsCount, halfPixelOffset, dashPattern, dashState, currentDashPoints, allDashSegments);
 
             // Add final dash segment if we're in dash state
             if (dashState.IsInDash && currentDashPoints.Count >= 2)
@@ -293,9 +293,9 @@ namespace Prowl.Quill
             return state;
         }
 
-        private static void ProcessLineSegments(List<Vector2> points, Vector2 halfPixelOffset, List<double> dashPattern, DashState dashState, List<Vector2> currentDashPoints, List<List<Vector2>> allDashSegments)
+        private static void ProcessLineSegments(Vector2[] points, int pointCount, Vector2 halfPixelOffset, List<double> dashPattern, DashState dashState, List<Vector2> currentDashPoints, List<List<Vector2>> allDashSegments)
         {
-            for (int i = 0; i < points.Count - 1; i++)
+            for (int i = 0; i < pointCount - 1; i++)
             {
                 Vector2 p1 = points[i];
                 Vector2 p2 = points[i + 1];

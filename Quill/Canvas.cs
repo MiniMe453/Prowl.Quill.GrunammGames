@@ -164,23 +164,70 @@ namespace Prowl.Quill
     {
         internal class SubPath
         {
-            internal List<Vector2> Points { get; }
-            internal bool IsClosed { get; }
+            // internal List<Vector2> Points { get; }
+            internal Vector2[] Points;
+            internal bool IsClosed { get; set;  }
+            internal int PointCount => _currPointIndex;
+            private int _currPointIndex = 0;
 
-            public SubPath(List<Vector2> points, bool isClosed)
+            public SubPath(Vector2[] points, bool isClosed)
             {
                 Points = points;
                 IsClosed = isClosed;
+                _currPointIndex = 0;
+            }
+            
+            public SubPath(bool isClosed)
+            {
+                Points = new Vector2[2];
+                IsClosed = isClosed;
+                _currPointIndex = 0;
+            }
+
+            public void Reset(bool isClosed)
+            {
+                _currPointIndex = 0;
+                IsClosed = isClosed;
+            }
+            
+            public void AddPoint(Vector2 point)
+            {
+                if (_currPointIndex >= Points.Length)
+                {
+                    var newVertexArray = new Vector2[Points.Length * 2];
+                    Array.Copy(Points, newVertexArray, _currPointIndex);
+                    Points = newVertexArray;
+                }
+
+                Points[_currPointIndex] = point;
+                _currPointIndex++;
             }
         }
 
+        private List<SubPath> _subPathPool = new List<SubPath>();
+        private int _subPathPoolIdx = 0;
+
+        private SubPath GetSubPathFromPool(bool isClosed, Vector2[] points = null)
+        {
+            if (_subPathPoolIdx >= _subPathPool.Count)
+            {
+                if(points != null)
+                    _subPathPool.Add(new SubPath(points, isClosed));
+                else
+                    _subPathPool.Add(new SubPath(isClosed));
+            }
+            
+            _subPathPool[_subPathPoolIdx].Reset(isClosed);
+            return _subPathPool[_subPathPoolIdx++];
+        }
+        
         public IReadOnlyList<DrawCall> DrawCalls => _drawCalls.Where(d => d.ElementCount != 0).ToList();
         public uint[] Indices => _indices;
         public Vertex[] Vertices => _vertices;
         // public IReadOnlyList<Vertex> Vertices => _vertices.AsReadOnly();
-        public Vector2 CurrentPoint => _currentSubPath != null && _currentSubPath.Points.Count > 0 ? CurrentPointInternal : Vector2.zero;
+        public Vector2 CurrentPoint => _currentSubPath != null && _currentSubPath.PointCount > 0 ? CurrentPointInternal : Vector2.zero;
 
-        internal Vector2 CurrentPointInternal => _currentSubPath.Points[_currentSubPath.Points.Count - 1];
+        internal Vector2 CurrentPointInternal => _currentSubPath.Points[_currentSubPath.PointCount - 1];
         internal ICanvasRenderer _renderer;
 
         internal List<DrawCall> _drawCalls = new List<DrawCall>();
@@ -245,6 +292,7 @@ namespace Prowl.Quill
             _currentIndicesIndex = 0;
             _vertexCount = 0;
             // _vertices.Clear();
+            _subPathPoolIdx = 0;
 
             _savedStates.Clear();
             _state = new ProwlCanvasState();
@@ -595,8 +643,9 @@ namespace Prowl.Quill
             if (!_isPathOpen)
                 BeginPath();
 
-            _currentSubPath = new SubPath(new List<Vector2>(), false);
-            _currentSubPath.Points.Add(new Vector2(x, y));
+            _currentSubPath = GetSubPathFromPool(false);
+            _currentSubPath.AddPoint(new Vector2(x, y));
+            // _currentSubPath.Points.Add(new Vector2(x, y));
             _subPaths.Add(_currentSubPath);
         }
 
@@ -619,7 +668,7 @@ namespace Prowl.Quill
             }
             else
             {
-                _currentSubPath.Points.Add(new Vector2(x, y));
+                _currentSubPath.AddPoint(new Vector2(x, y));
             }
         }
 
@@ -633,7 +682,7 @@ namespace Prowl.Quill
         /// </remarks>
         public void ClosePath()
         {
-            if (_currentSubPath != null && _currentSubPath.Points.Count >= 2)
+            if (_currentSubPath != null && _currentSubPath.PointCount >= 2)
             {
                 // Move to the first point of the current subpath to start a new one
                 Vector2 firstPoint = _currentSubPath.Points[0];
@@ -959,7 +1008,7 @@ namespace Prowl.Quill
             d3 = d3 >= 0 ? d3 : -d3;
             if ((d2 + d3) * (d2 + d3) < tess_tol * (dx * dx + dy * dy))
             {
-                _currentSubPath.Points.Add(new Vector2(x4, y4));
+                _currentSubPath.AddPoint(new Vector2(x4, y4));
             }
             else if (level < 10)
             {
@@ -1046,7 +1095,7 @@ namespace Prowl.Quill
             var tess = new Tess();
             foreach (var path in _subPaths)
             {
-                var copy = path.Points.ToArray();
+                var copy = path.Points;
                 for (int i = 0; i < copy.Length; i++)
                     copy[i] = TransformPoint(copy[i]) + new Vector2(0.5, 0.5); // And offset by half a pixel to properly align it with Stroke()
                 var points = copy.Select(v => new ContourVertex() { Position = new Vec3() { X = v.x, Y = v.y } }).ToArray();
@@ -1079,12 +1128,12 @@ namespace Prowl.Quill
 
         private void FillSubPath(SubPath subPath)
         {
-            if (subPath.Points.Count < 3)
+            if (subPath.PointCount < 3)
                 return;
 
             // Transform each point
             Vector2 center = Vector2.zero;
-            var copy = subPath.Points.ToArray();
+            var copy = subPath.Points;
             for (int i = 0; i < copy.Length; i++)
             {
                 var point = copy[i];
@@ -1166,12 +1215,12 @@ namespace Prowl.Quill
 
         private void StrokeSubPath(SubPath subPath)
         {
-            if (subPath.Points.Count < 2)
+            if (subPath.PointCount < 2)
                 return;
 
-            var copy = subPath.Points.ToArray();
+            var copy = subPath.Points;
             // Transform each point
-            for (int i = 0; i < subPath.Points.Count; i++)
+            for (int i = 0; i < subPath.PointCount; i++)
                 subPath.Points[i] = TransformPoint(subPath.Points[i]);
 
             bool isClosed = subPath.IsClosed;
@@ -1186,7 +1235,7 @@ namespace Prowl.Quill
                 }
             }
 
-            var triangles = PolylineMesher.Create(subPath.Points, _state.strokeWidth * _state.strokeScale, _pixelWidth, _state.strokeColor, _state.strokeJoint, _state.miterLimit, false, _state.strokeStartCap, _state.strokeEndCap, dashPattern, _state.strokeDashOffset * _state.strokeScale);
+            var triangles = PolylineMesher.Create(subPath.Points, subPath.PointCount, _state.strokeWidth * _state.strokeScale, _pixelWidth, _state.strokeColor, _state.strokeJoint, _state.miterLimit, false, _state.strokeStartCap, _state.strokeEndCap, dashPattern, _state.strokeDashOffset * _state.strokeScale);
 
 
             // Store the starting index to reference _vertices
@@ -1211,7 +1260,7 @@ namespace Prowl.Quill
             AddTriangleCount(triangles.Count);
 
             // Reset the points to their original values
-            for (int i = 0; i < subPath.Points.Count; i++)
+            for (int i = 0; i < subPath.PointCount; i++)
                 subPath.Points[i] = copy[i];
         }
 
